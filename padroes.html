@@ -147,6 +147,37 @@
         let allMessages = []; // Armazena { id, text, createdAt }
         let currentUser = null;
         let toastTimeout = null;
+        let isSeedingDefaults = false;
+
+        // Lista de mensagens padrão do Sigma Cloud
+        const DEFAULT_MESSAGES = [
+            "Verificado nas imagens que os portões estão fechados e operando dentro da normalidade.",
+            "Verificado nas imagens que o porteiro está no local.",
+            "Verificado que a porta de pedestre está aberta, portão da garagem fechada de acordo com protocolo.",
+            "Verificado que conexão do cliente é por linha telefônica. Sem comunicação.",
+            "Verificado que conexão do cliente é por GPRS e esta oscilando.",
+            "Verificado que houve disparo em zona aberta, zona foi inibida.",
+            "Verificado que esta havendo oscilação na conexão com a internet. A central de alarmes está online e funcionando normalmente.",
+            "Verificado que a conexão foi restaurada após oscilação.",
+            "Verificado que a internet foi restaurada após oscilação.",
+            "Verificado que a central de alarme está comunicando normalmente.",
+            "Verificado no sistema que o alarme foi DESARMADO PELO USUARIO",
+            "Verificado pelo sistema que foi a RESTAURAÇÃO ALARME FURTO",
+            "Foi verificado por câmeras de monitoramento que tem funcionários no local.",
+            "Após verificação por meio do sistema de monitoramento por câmeras, não foram identificadas anormalidades no local.",
+            "Verificado pelo sistema que houve a restauração do alarme e está comunicando normalmente.",
+            "Verificado zona com disparos recorrentes. Realizado desarme e arme, inibido zona 14. Sem imagens de câmera no local.",
+            "Verificado zona com disparos recorrentes. Realizado desarme e arme. Pelas imagens não foram identificadas anormalidades no local.",
+            "Verificado pelo sistema que houve a restauração do alarme. Realizado desarme e arme. Pelas imagens não foram identificadas anormalidades no local.",
+            "Sistema reportando restauração de energia. A central de alarmes está online e funcionando normalmente.",
+            "Sistema reportando restauração após falha de energia. A central de alarmes está online e funcionando normalmente.",
+            "Sistema reportando falha na bateria.",
+            "Sistema reportando restauração da bateria.",
+            "Sistema reportando bateria baixa.",
+            "Sistema reportando falha no sensor.",
+            "Sistema reportando restauração do sensor.",
+            "Verificado, restauração de \"Alarme-Falha Supervisão Em Sensor\""
+        ];
 
         // Elementos do DOM
         const searchInput = document.getElementById('searchInput');
@@ -204,6 +235,73 @@
                 .trim();
         }
 
+        // Destaca os termos pesquisados dentro do texto da mensagem
+        function highlightMatches(originalText, queryWords) {
+            if (!queryWords || queryWords.length === 0) {
+                const span = document.createElement('span');
+                span.textContent = originalText;
+                return span;
+            }
+
+            // Mapeia cada caractere do texto original para sua versão normalizada
+            const normChars = [];
+            const origIndices = [];
+            for (let i = 0; i < originalText.length; i++) {
+                const normChar = originalText[i].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                for (let c of normChar) {
+                    normChars.push(c);
+                    origIndices.push(i);
+                }
+            }
+            const normFull = normChars.join('');
+            const highlightMask = new Array(originalText.length).fill(false);
+
+            queryWords.forEach(word => {
+                if (!word) return;
+                let startIndex = 0;
+                while ((startIndex = normFull.indexOf(word, startIndex)) !== -1) {
+                    for (let k = startIndex; k < startIndex + word.length; k++) {
+                        highlightMask[origIndices[k]] = true;
+                    }
+                    startIndex += word.length;
+                }
+            });
+
+            const container = document.createElement('span');
+            let currentText = '';
+            let isHighlighted = highlightMask[0] || false;
+
+            for (let i = 0; i < originalText.length; i++) {
+                if (highlightMask[i] === isHighlighted) {
+                    currentText += originalText[i];
+                } else {
+                    if (isHighlighted) {
+                        const mark = document.createElement('mark');
+                        mark.className = "bg-emerald-500/25 text-emerald-300 font-semibold rounded px-0.5";
+                        mark.textContent = currentText;
+                        container.appendChild(mark);
+                    } else {
+                        container.appendChild(document.createTextNode(currentText));
+                    }
+                    currentText = originalText[i];
+                    isHighlighted = highlightMask[i];
+                }
+            }
+
+            if (currentText) {
+                if (isHighlighted) {
+                    const mark = document.createElement('mark');
+                    mark.className = "bg-emerald-500/25 text-emerald-300 font-semibold rounded px-0.5";
+                    mark.textContent = currentText;
+                    container.appendChild(mark);
+                } else {
+                    container.appendChild(document.createTextNode(currentText));
+                }
+            }
+
+            return container;
+        }
+
         // Função para copiar texto para a área de transferência
         function copyToClipboard(text, cardElement) {
             // Usa textarea temporário com execCommand para garantir funcionamento em qualquer navegador/iframe
@@ -258,21 +356,24 @@
 
             // Filtra as mensagens se houver texto na barra
             let filtered = allMessages;
+            let queryWords = [];
+
             if (query !== '') {
-                const queryWords = query.split(/\s+/); // Permite buscar por múltiplas palavras fora de ordem
+                queryWords = query.split(/\s+/).filter(Boolean); // Separa palavras digitadas
+                
+                // Retorna TODAS as frases que contenham as palavras pesquisadas em qualquer posição
                 filtered = allMessages.filter(item => {
                     const normItem = normalizeText(item.text);
                     return queryWords.every(word => normItem.includes(word));
                 });
 
-                // Ordena para que as frases que começam com o termo pesquisado fiquem mais no topo
+                // Ordena por relevância (mais ocorrências / aparece mais cedo na frase sobe primeiro)
                 filtered.sort((a, b) => {
                     const normA = normalizeText(a.text);
                     const normB = normalizeText(b.text);
-                    const aStarts = normA.startsWith(query);
-                    const bStarts = normB.startsWith(query);
-                    if (aStarts && !bStarts) return -1;
-                    if (!aStarts && bStarts) return 1;
+                    const posA = normA.indexOf(queryWords[0]);
+                    const posB = normB.indexOf(queryWords[0]);
+                    if (posA !== posB) return posA - posB;
                     return (b.createdAt || 0) - (a.createdAt || 0);
                 });
             } else {
@@ -281,7 +382,7 @@
             }
 
             // Atualiza contador
-            counterText.textContent = `${filtered.length} ${filtered.length === 1 ? 'mensagem' : 'mensagens'}`;
+            counterText.textContent = `${filtered.length} ${filtered.length === 1 ? 'mensagem encontrada' : 'mensagens encontradas'}`;
 
             // Limpa container
             messagesContainer.innerHTML = '';
@@ -290,7 +391,7 @@
                 if (allMessages.length === 0) {
                     messagesContainer.innerHTML = `
                         <div class="text-center py-12 px-4 border border-dashed border-neutral-800 rounded-2xl">
-                            <p class="text-neutral-400 text-sm">Nenhuma mensagem cadastrada ainda.</p>
+                            <p class="text-neutral-400 text-sm">Carregando ou aguardando mensagens...</p>
                             <p class="text-neutral-600 text-xs mt-1">Digite uma frase acima e aperte o botão <strong class="text-emerald-500">E</strong> para salvar.</p>
                         </div>
                     `;
@@ -305,15 +406,15 @@
                 return;
             }
 
-            // Cria os cards
+            // Cria os cards para TODAS as mensagens correspondentes (2, 3, 10, etc.)
             filtered.forEach(item => {
                 const card = document.createElement('div');
-                card.className = "group flex items-center justify-between gap-4 p-4 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-800 hover:border-neutral-600 rounded-xl cursor-pointer transition-all duration-150 select-none";
+                card.className = "group flex items-center justify-between gap-4 p-4 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-800 hover:border-emerald-500/50 rounded-xl cursor-pointer transition-all duration-150 select-none";
                 
-                // Texto da mensagem
+                // Texto da mensagem com destaque na palavra pesquisada
                 const textEl = document.createElement('p');
                 textEl.className = "text-gray-100 text-sm sm:text-base leading-relaxed break-words flex-1";
-                textEl.textContent = item.text;
+                textEl.appendChild(highlightMatches(item.text, queryWords));
 
                 // Indicador visual de clique/cópia
                 const badgeEl = document.createElement('span');
@@ -330,6 +431,31 @@
 
                 messagesContainer.appendChild(card);
             });
+        }
+
+        // Insere automaticamente as mensagens padrão no Firebase caso ainda não estejam lá
+        async function seedDefaultMessagesIfNeeded(existingMessages) {
+            if (isSeedingDefaults) return;
+            isSeedingDefaults = true;
+
+            try {
+                const existingNormalized = new Set(existingMessages.map(m => normalizeText(m.text)));
+                const missingMessages = DEFAULT_MESSAGES.filter(msg => !existingNormalized.has(normalizeText(msg)));
+
+                if (missingMessages.length > 0) {
+                    statusText.textContent = `Salvando ${missingMessages.length} padrões...`;
+                    let baseTime = Date.now();
+                    for (let i = 0; i < missingMessages.length; i++) {
+                        await addDoc(messagesColRef, {
+                            text: missingMessages[i].trim(),
+                            createdAt: baseTime + i
+                        });
+                    }
+                    showToast(`${missingMessages.length} mensagens padrão adicionadas!`, 'success');
+                }
+            } catch (err) {
+                console.error("Erro ao popular mensagens padrão:", err);
+            }
         }
 
         // Ação do Botão E (Adicionar frase)
@@ -444,11 +570,14 @@
             }
 
             // Escuta alterações no banco em tempo real
-            onSnapshot(messagesColRef, (snapshot) => {
+            onSnapshot(messagesColRef, async (snapshot) => {
                 allMessages = snapshot.docs.map(doc => ({
                     id: doc.id,
                     ...doc.data()
                 }));
+
+                // Garante que todas as 26 mensagens padrão sejam salvas no banco
+                await seedDefaultMessagesIfNeeded(allMessages);
                 
                 statusDot.classList.remove('bg-yellow-500', 'bg-red-500');
                 statusDot.classList.add('bg-emerald-500');
