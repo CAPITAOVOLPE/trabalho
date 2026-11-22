@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sigma Cloud - Mensagens Rápidas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000;
+            color: #e5e7eb;
+        }
+        /* Barra de rolagem discreta */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #262626;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #404040;
+        }
+    </style>
+</head>
+<body class="bg-black text-gray-200 min-h-screen flex flex-col items-center p-4 sm:p-8 selection:bg-emerald-500 selection:text-black">
+
+    <!-- Container Principal -->
+    <div class="w-full max-w-3xl flex flex-col gap-6">
+        
+        <!-- Cabeçalho -->
+        <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-4">
+            <div>
+                <h1 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Mensagens Rápidas • Sigma Cloud
+                </h1>
+                <p class="text-xs sm:text-sm text-neutral-400 mt-1">
+                    Digite para filtrar e clique na mensagem para copiar automaticamente.
+                </p>
+            </div>
+            <div id="statusBadge" class="text-xs px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 self-start sm:self-auto flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-yellow-500" id="statusDot"></span>
+                <span id="statusText">Conectando...</span>
+            </div>
+        </header>
+
+        <!-- Barra de Pesquisa e Botões de Ação (T e E) -->
+        <div class="sticky top-4 z-20 bg-black/90 backdrop-blur-md pt-1 pb-2">
+            <div class="flex items-stretch gap-2 sm:gap-3">
+                <!-- Campo de Texto -->
+                <div class="relative flex-1">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        placeholder="Pesquisar ou digitar nova mensagem..." 
+                        autocomplete="off"
+                        class="w-full h-14 pl-4 pr-10 bg-neutral-900 border border-neutral-700 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all text-base"
+                    >
+                    <!-- Botão X para limpar texto rapidamente -->
+                    <button 
+                        id="clearInputBtn" 
+                        title="Limpar campo"
+                        class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-1.5 rounded-lg transition-colors"
+                    >
+                        ✕
+                    </button>
+                </div>
+
+                <!-- Botão T = Excluir Frase -->
+                <button 
+                    id="btnDelete" 
+                    title="Excluir frase digitada (ou correspondente)"
+                    class="w-14 h-14 flex flex-col items-center justify-center bg-neutral-900 hover:bg-red-950/60 active:scale-95 text-red-500 border border-neutral-700 hover:border-red-500/50 rounded-xl font-bold text-lg transition-all cursor-pointer select-none shadow-lg"
+                >
+                    <span>T</span>
+                    <span class="text-[9px] font-normal uppercase tracking-wider text-red-400/80 -mt-1">Excluir</span>
+                </button>
+
+                <!-- Botão E = Adicionar Frase -->
+                <button 
+                    id="btnAdd" 
+                    title="Adicionar frase ao banco de dados"
+                    class="w-14 h-14 flex flex-col items-center justify-center bg-neutral-900 hover:bg-emerald-950/60 active:scale-95 text-emerald-500 border border-neutral-700 hover:border-emerald-500/50 rounded-xl font-bold text-lg transition-all cursor-pointer select-none shadow-lg"
+                >
+                    <span>E</span>
+                    <span class="text-[9px] font-normal uppercase tracking-wider text-emerald-400/80 -mt-1">Add</span>
+                </button>
+            </div>
+
+            <!-- Dica rápida de atalhos / contador -->
+            <div class="flex justify-between items-center mt-2 px-1 text-xs text-neutral-500">
+                <span>Clique em qualquer card abaixo para copiar</span>
+                <span id="counterText">0 mensagens</span>
+            </div>
+        </div>
+
+        <!-- Lista de Mensagens -->
+        <main id="messagesContainer" class="flex flex-col gap-2.5 pb-12">
+            <!-- Os cards serão inseridos aqui via JavaScript -->
+            <div class="text-center py-12 text-neutral-600 text-sm">
+                Carregando mensagens do banco de dados...
+            </div>
+        </main>
+
+    </div>
+
+    <!-- Notificação Flutuante (Toast) -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 translate-y-20 opacity-0 pointer-events-none transition-all duration-300 z-50 px-5 py-3 rounded-xl font-medium text-sm shadow-2xl flex items-center gap-2.5 border">
+        <span id="toastIcon"></span>
+        <span id="toastMessage"></span>
+    </div>
+
+    <!-- Script Firebase e Lógica da Aplicação -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configuração do Firebase fornecida pelo usuário
+        const firebaseConfig = {
+            apiKey: "AIzaSyBLZ-lOJ9V750N_hFPEFBWEwd0xXVzGKSs",
+            authDomain: "nord-dba5d.firebaseapp.com",
+            databaseURL: "https://nord-dba5d-default-rtdb.firebaseio.com",
+            projectId: "nord-dba5d",
+            storageBucket: "nord-dba5d.firebasestorage.app",
+            messagingSenderId: "473231525493",
+            appId: "1:473231525493:web:2def50deed039d6eea5a3c"
+        };
+
+        // Inicializa Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Referência da coleção no Firestore
+        // Usando caminho compatível com regras padrão e estrutura organizada
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nord-dba5d';
+        const messagesColRef = collection(db, 'artifacts', appId, 'public', 'data', 'mensagens_sigma');
+
+        // Estado da aplicação
+        let allMessages = []; // Armazena { id, text, createdAt }
+        let currentUser = null;
+        let toastTimeout = null;
+
+        // Elementos do DOM
+        const searchInput = document.getElementById('searchInput');
+        const clearInputBtn = document.getElementById('clearInputBtn');
+        const btnAdd = document.getElementById('btnAdd');
+        const btnDelete = document.getElementById('btnDelete');
+        const messagesContainer = document.getElementById('messagesContainer');
+        const counterText = document.getElementById('counterText');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        // Função para mostrar notificações visuais (substitui alert)
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastIcon = document.getElementById('toastIcon');
+            const toastMessage = document.getElementById('toastMessage');
+
+            clearTimeout(toastTimeout);
+
+            toastMessage.textContent = message;
+            
+            // Reseta classes de cor
+            toast.className = "fixed bottom-6 left-1/2 -translate-x-1/2 transition-all duration-300 z-50 px-5 py-3 rounded-xl font-medium text-sm shadow-2xl flex items-center gap-2.5 border";
+
+            if (type === 'success') {
+                toast.classList.add('bg-neutral-900', 'text-emerald-400', 'border-emerald-500/40');
+                toastIcon.textContent = '✓';
+            } else if (type === 'delete') {
+                toast.classList.add('bg-neutral-900', 'text-red-400', 'border-red-500/40');
+                toastIcon.textContent = '🗑';
+            } else if (type === 'warning') {
+                toast.classList.add('bg-neutral-900', 'text-amber-400', 'border-amber-500/40');
+                toastIcon.textContent = '⚠';
+            }
+
+            // Exibe
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-20', 'opacity-0');
+                toast.classList.add('translate-y-0', 'opacity-100');
+            });
+
+            // Oculta após 2.5 segundos
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 2500);
+        }
+
+        // Função para normalizar texto (remove acentos e deixa minúsculo para busca inteligente)
+        function normalizeText(str) {
+            return str
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .trim();
+        }
+
+        // Função para copiar texto para a área de transferência
+        function copyToClipboard(text, cardElement) {
+            // Usa textarea temporário com execCommand para garantir funcionamento em qualquer navegador/iframe
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                document.execCommand('copy');
+                showToast('Copiado para colar no Sigma!', 'success');
+                
+                // Feedback visual no card clicado
+                if (cardElement) {
+                    cardElement.classList.add('border-emerald-500', 'bg-emerald-950/30');
+                    const badge = cardElement.querySelector('.copy-badge');
+                    if (badge) {
+                        badge.textContent = 'COPIADO!';
+                        badge.classList.remove('text-neutral-500', 'bg-neutral-800');
+                        badge.classList.add('text-black', 'bg-emerald-500', 'font-bold');
+                    }
+                    setTimeout(() => {
+                        cardElement.classList.remove('border-emerald-500', 'bg-emerald-950/30');
+                        if (badge) {
+                            badge.textContent = 'Copiar';
+                            badge.classList.add('text-neutral-500', 'bg-neutral-800');
+                            badge.classList.remove('text-black', 'bg-emerald-500', 'font-bold');
+                        }
+                    }, 900);
+                }
+            } catch (err) {
+                showToast('Erro ao copiar texto.', 'warning');
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        // Renderiza a lista filtrada e ordenada na tela
+        function renderMessages() {
+            const rawQuery = searchInput.value;
+            const query = normalizeText(rawQuery);
+
+            // Mostra ou esconde botão de limpar input
+            if (rawQuery.length > 0) {
+                clearInputBtn.classList.remove('hidden');
+            } else {
+                clearInputBtn.classList.add('hidden');
+            }
+
+            // Filtra as mensagens se houver texto na barra
+            let filtered = allMessages;
+            if (query !== '') {
+                const queryWords = query.split(/\s+/); // Permite buscar por múltiplas palavras fora de ordem
+                filtered = allMessages.filter(item => {
+                    const normItem = normalizeText(item.text);
+                    return queryWords.every(word => normItem.includes(word));
+                });
+
+                // Ordena para que as frases que começam com o termo pesquisado fiquem mais no topo
+                filtered.sort((a, b) => {
+                    const normA = normalizeText(a.text);
+                    const normB = normalizeText(b.text);
+                    const aStarts = normA.startsWith(query);
+                    const bStarts = normB.startsWith(query);
+                    if (aStarts && !bStarts) return -1;
+                    if (!aStarts && bStarts) return 1;
+                    return (b.createdAt || 0) - (a.createdAt || 0);
+                });
+            } else {
+                // Sem pesquisa: ordena pelas mais recentes primeiro
+                filtered = [...allMessages].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            }
+
+            // Atualiza contador
+            counterText.textContent = `${filtered.length} ${filtered.length === 1 ? 'mensagem' : 'mensagens'}`;
+
+            // Limpa container
+            messagesContainer.innerHTML = '';
+
+            if (filtered.length === 0) {
+                if (allMessages.length === 0) {
+                    messagesContainer.innerHTML = `
+                        <div class="text-center py-12 px-4 border border-dashed border-neutral-800 rounded-2xl">
+                            <p class="text-neutral-400 text-sm">Nenhuma mensagem cadastrada ainda.</p>
+                            <p class="text-neutral-600 text-xs mt-1">Digite uma frase acima e aperte o botão <strong class="text-emerald-500">E</strong> para salvar.</p>
+                        </div>
+                    `;
+                } else {
+                    messagesContainer.innerHTML = `
+                        <div class="text-center py-10 px-4 border border-dashed border-neutral-800 rounded-2xl">
+                            <p class="text-neutral-400 text-sm">Nenhuma mensagem encontrada com "<span class="text-white">${rawQuery}</span>".</p>
+                            <p class="text-neutral-500 text-xs mt-2">Quer salvar essa frase? Aperte o botão <strong class="text-emerald-500">E</strong> ao lado da barra.</p>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            // Cria os cards
+            filtered.forEach(item => {
+                const card = document.createElement('div');
+                card.className = "group flex items-center justify-between gap-4 p-4 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-800 hover:border-neutral-600 rounded-xl cursor-pointer transition-all duration-150 select-none";
+                
+                // Texto da mensagem
+                const textEl = document.createElement('p');
+                textEl.className = "text-gray-100 text-sm sm:text-base leading-relaxed break-words flex-1";
+                textEl.textContent = item.text;
+
+                // Indicador visual de clique/cópia
+                const badgeEl = document.createElement('span');
+                badgeEl.className = "copy-badge shrink-0 text-xs px-2.5 py-1 rounded-md bg-neutral-800 text-neutral-500 group-hover:text-neutral-200 transition-colors";
+                badgeEl.textContent = "Copiar";
+
+                card.appendChild(textEl);
+                card.appendChild(badgeEl);
+
+                // Evento de clique: copia imediatamente
+                card.addEventListener('click', () => {
+                    copyToClipboard(item.text, card);
+                });
+
+                messagesContainer.appendChild(card);
+            });
+        }
+
+        // Ação do Botão E (Adicionar frase)
+        async function handleAddMessage() {
+            const text = searchInput.value.trim();
+            
+            if (!text) {
+                showToast('Digite uma frase antes de apertar E.', 'warning');
+                searchInput.focus();
+                return;
+            }
+
+            // Verifica se já existe exatamente igual
+            const alreadyExists = allMessages.some(m => normalizeText(m.text) === normalizeText(text));
+            if (alreadyExists) {
+                showToast('Essa mensagem já está salva na lista!', 'warning');
+                return;
+            }
+
+            try {
+                btnAdd.disabled = true;
+                await addDoc(messagesColRef, {
+                    text: text,
+                    createdAt: Date.now()
+                });
+                
+                searchInput.value = '';
+                renderMessages();
+                showToast('Frase adicionada ao banco!', 'success');
+                searchInput.focus();
+            } catch (error) {
+                console.error("Erro ao adicionar:", error);
+                showToast('Erro ao salvar no Firebase. Verifique as regras.', 'warning');
+            } finally {
+                btnAdd.disabled = false;
+            }
+        }
+
+        // Ação do Botão T (Excluir frase)
+        async function handleDeleteMessage() {
+            const rawText = searchInput.value.trim();
+            const normSearch = normalizeText(rawText);
+
+            if (!normSearch) {
+                showToast('Digite a frase que deseja excluir antes de apertar T.', 'warning');
+                searchInput.focus();
+                return;
+            }
+
+            // 1. Procura correspondência exata (ignorando maiúsculas/acentos)
+            let target = allMessages.find(m => normalizeText(m.text) === normSearch);
+
+            // 2. Se não achar exata, mas houver apenas 1 resultado filtrado na tela, exclui ele
+            if (!target) {
+                const queryWords = normSearch.split(/\s+/);
+                const matches = allMessages.filter(item => {
+                    const normItem = normalizeText(item.text);
+                    return queryWords.every(word => normItem.includes(word));
+                });
+
+                if (matches.length === 1) {
+                    target = matches[0];
+                } else if (matches.length > 1) {
+                    showToast(`Existem ${matches.length} frases parecidas. Digite a frase completa para excluir.`, 'warning');
+                    return;
+                }
+            }
+
+            if (!target) {
+                showToast('Nenhuma frase correspondente encontrada para excluir.', 'warning');
+                return;
+            }
+
+            try {
+                btnDelete.disabled = true;
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mensagens_sigma', target.id));
+                
+                searchInput.value = '';
+                renderMessages();
+                showToast('Frase excluída com sucesso!', 'delete');
+                searchInput.focus();
+            } catch (error) {
+                console.error("Erro ao excluir:", error);
+                showToast('Erro ao excluir do Firebase.', 'warning');
+            } finally {
+                btnDelete.disabled = false;
+            }
+        }
+
+        // Listeners de Eventos da Interface
+        searchInput.addEventListener('input', renderMessages);
+        
+        clearInputBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            renderMessages();
+            searchInput.focus();
+        });
+
+        btnAdd.addEventListener('click', handleAddMessage);
+        btnDelete.addEventListener('click', handleDeleteMessage);
+
+        // Inicialização de Autenticação e Escuta em Tempo Real do Firestore
+        async function initFirebase() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.warn("Aviso na autenticação anônima (tentando acesso direto):", err);
+            }
+
+            // Escuta alterações no banco em tempo real
+            onSnapshot(messagesColRef, (snapshot) => {
+                allMessages = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
+                statusDot.classList.remove('bg-yellow-500', 'bg-red-500');
+                statusDot.classList.add('bg-emerald-500');
+                statusText.textContent = 'Sincronizado';
+                
+                renderMessages();
+            }, (error) => {
+                console.error("Erro no Firestore:", error);
+                statusDot.classList.remove('bg-yellow-500', 'bg-emerald-500');
+                statusDot.classList.add('bg-red-500');
+                statusText.textContent = 'Erro de Permissão';
+                
+                messagesContainer.innerHTML = `
+                    <div class="p-4 bg-red-950/40 border border-red-500/40 rounded-xl text-sm text-red-200">
+                        <p class="font-bold">Não foi possível ler o banco de dados.</p>
+                        <p class="text-xs mt-1 text-red-300">Verifique se o <strong>Firestore Database</strong> está ativado no seu painel do Firebase e se as regras de leitura/escrita estão liberadas.</p>
+                    </div>
+                `;
+            });
+        }
+
+        // Inicia o sistema
+        initFirebase();
+    </script>
+</body>
+</html>
